@@ -1,0 +1,20 @@
+import { NextResponse } from "next/server"
+import { requireUser } from "@/lib/auth"
+import { db } from "@/lib/db"
+
+export async function GET() {
+  try {
+    const user = await requireUser()
+    const opportunities = await db.opportunity.findMany({
+      where: { userId: user.id },
+      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+      take: 100,
+    })
+    return NextResponse.json({ opportunities })
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHENTICATED") {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    }
+    return NextResponse.json({ error: "Could not load opportunities" }, { status: 500 })
+  }
+}
