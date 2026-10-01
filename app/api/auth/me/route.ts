@@ -17,6 +17,7 @@ export async function GET() {
     authenticated: true,
     user: { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl },
     driveConnected: Boolean(connection),
+    driveAccessMode: process.env.GOOGLE_DRIVE_ACCESS_MODE === "full" ? "full" : "picker",
     latestScan,
     fileCount,
     opportunityCount,
