@@ -48,7 +48,7 @@ model Session {
 }
 
 model DriveFile {
-  id               String         @id @default(cuid())
+  id               String          @id @default(cuid())
   userId           String
   driveFileId      String
   name             String
@@ -58,11 +58,11 @@ model DriveFile {
   webViewLink      String?
   parentIds        Json?
   contentPreview   String?
-  contentStatus    String         @default("pending")
+  contentStatus    String          @default("pending")
   lastIndexedAt    DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   analyses         AssetAnalysis[]
 
   @@unique([userId, driveFileId])
@@ -74,6 +74,7 @@ model Scan {
   id              String   @id @default(cuid())
   userId          String
   status          String   @default("queued")
+  drivePageToken  String?
   totalFiles      Int      @default(0)
   indexedFiles    Int      @default(0)
   analysedFiles   Int      @default(0)
@@ -91,7 +92,7 @@ model Scan {
 }
 
 model AssetAnalysis {
-  id                    String   @id @default(cuid())
+  id                    String    @id @default(cuid())
   scanId                String
   driveFileId           String
   summary               String
@@ -100,9 +101,9 @@ model AssetAnalysis {
   keywords              Json
   commercialUse         String?
   suggestedRole         String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  scan                  Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  scan                  Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
   driveFile             DriveFile @relation(fields: [driveFileId], references: [id], onDelete: Cascade)
 
   @@unique([scanId, driveFileId])
