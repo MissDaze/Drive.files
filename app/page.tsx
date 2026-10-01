@@ -71,13 +71,14 @@ const ACTIVE = new Set(["inventorying", "analysing", "synthesizing"])
 
 function statusLabel(status?: string) {
   if (!status) return "Not scanned"
-  return {
+  const labels: Record<string, string> = {
     queued: "Queued",
     inventorying: "Inventorying Drive",
     analysing: "Analysing assets",
     synthesizing: "Finding opportunities",
     completed: "Complete",
-  }[status] || status
+  }
+  return labels[status] || status
 }
 
 function scoreStyle(score: number) {
