@@ -43,10 +43,13 @@ export async function POST(_request: NextRequest, context: { params: { id: strin
     if (!scan) return NextResponse.json({ error: "Scan not found" }, { status: 404 })
     if (scan.status !== "analysing") return NextResponse.json({ scan })
 
+    const fullDriveMode = process.env.GOOGLE_DRIVE_ACCESS_MODE === "full"
+    const scanFileScope = fullDriveMode ? { lastIndexedAt: { gte: scan.startedAt } } : {}
+
     const files = await db.driveFile.findMany({
       where: {
         userId: user.id,
-        lastIndexedAt: { gte: scan.startedAt },
+        ...scanFileScope,
         analyses: { none: { scanId: scan.id } },
       },
       orderBy: [{ modifiedTime: "desc" }, { id: "asc" }],
@@ -151,7 +154,11 @@ export async function POST(_request: NextRequest, context: { params: { id: strin
     }
 
     const remaining = await db.driveFile.count({
-      where: { userId: user.id, lastIndexedAt: { gte: scan.startedAt }, analyses: { none: { scanId: scan.id } } },
+      where: {
+        userId: user.id,
+        ...scanFileScope,
+        analyses: { none: { scanId: scan.id } },
+      },
     })
 
     const updated = await db.scan.update({
