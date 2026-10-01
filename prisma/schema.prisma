@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String            @id @default(cuid())
+  googleSub        String            @unique
+  email            String            @unique
+  name             String?
+  avatarUrl        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  googleConnection GoogleConnection?
+  sessions         Session[]
+  driveFiles       DriveFile[]
+  scans            Scan[]
+  opportunities    Opportunity[]
+  bundles          Bundle[]
+}
+
+model GoogleConnection {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  encryptedAccessToken  String
+  encryptedRefreshToken String?
+  accessTokenExpiresAt  DateTime
+  scope                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model DriveFile {
+  id               String         @id @default(cuid())
+  userId           String
+  driveFileId      String
+  name             String
+  mimeType         String
+  size             String?
+  modifiedTime     DateTime?
+  webViewLink      String?
+  parentIds        Json?
+  contentPreview   String?
+  contentStatus    String         @default("pending")
+  lastIndexedAt    DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses         AssetAnalysis[]
+
+  @@unique([userId, driveFileId])
+  @@index([userId, mimeType])
+  @@index([userId, modifiedTime])
+}
+
+model Scan {
+  id              String   @id @default(cuid())
+  userId          String
+  status          String   @default("queued")
+  totalFiles      Int      @default(0)
+  indexedFiles    Int      @default(0)
+  analysedFiles   Int      @default(0)
+  skippedFiles    Int      @default(0)
+  error           String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses        AssetAnalysis[]
+  opportunities   Opportunity[]
+
+  @@index([userId, createdAt])
+}
+
+model AssetAnalysis {
+  id                    String   @id @default(cuid())
+  scanId                String
+  driveFileId           String
+  summary               String
+  category              String
+  monetizationPotential Int
+  keywords              Json
+  commercialUse         String?
+  suggestedRole         String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  scan                  Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  driveFile             DriveFile @relation(fields: [driveFileId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, driveFileId])
+  @@index([scanId, category])
+}
+
+model Opportunity {
+  id              String   @id @default(cuid())
+  userId          String
+  scanId          String?
+  title           String
+  description     String
+  status          String   @default("discovered")
+  score           Int
+  fileIds         Json
+  targetAudience  String
+  suggestedPrice  String?
+  monetization    String?
+  missingPieces   Json?
+  nextSteps       Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scan            Scan?    @relation(fields: [scanId], references: [id], onDelete: SetNull)
+
+  @@index([userId, score])
+}
+
+model Bundle {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  fileIds     Json
+  manifest    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
