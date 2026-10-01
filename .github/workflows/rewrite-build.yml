@@ -1,0 +1,25 @@
+name: Asset Archaeologist Build Check
+
+on:
+  push:
+    branches:
+      - rewrite/asset-archaeologist
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/asset_archaeologist
+      APP_ENCRYPTION_KEY: ci-only-encryption-key
+      APP_URL: http://localhost:3000
+      GOOGLE_CLIENT_ID: ci-client
+      GOOGLE_CLIENT_SECRET: ci-secret
+      OPENROUTER_API_KEY: ci-openrouter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
