@@ -25,6 +25,25 @@ export async function POST() {
     const connection = await db.googleConnection.findUnique({ where: { userId: user.id } })
     if (!connection) return NextResponse.json({ error: "Connect Google Drive first" }, { status: 400 })
 
+    const fullDriveMode = process.env.GOOGLE_DRIVE_ACCESS_MODE === "full"
+
+    if (!fullDriveMode) {
+      const selectedCount = await db.driveFile.count({ where: { userId: user.id } })
+      if (!selectedCount) {
+        return NextResponse.json({ error: "Choose one or more Drive files first" }, { status: 400 })
+      }
+
+      const scan = await db.scan.create({
+        data: {
+          userId: user.id,
+          status: "analysing",
+          totalFiles: selectedCount,
+          indexedFiles: selectedCount,
+        },
+      })
+      return NextResponse.json({ scan })
+    }
+
     const scan = await db.scan.create({
       data: { userId: user.id, status: "inventorying" },
     })
