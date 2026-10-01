@@ -1,60 +1,98 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
+import { db } from "@/lib/db"
+import { encryptSecret } from "@/lib/crypto"
+import { createSession } from "@/lib/auth"
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const code = searchParams.get("code")
-  const error = searchParams.get("error")
+  const url = new URL(request.url)
+  const code = url.searchParams.get("code")
+  const returnedState = url.searchParams.get("state")
+  const expectedState = cookies().get("oauth_state")?.value
 
-  if (error) {
-    return NextResponse.redirect("/?error=access_denied")
+  if (!code || !returnedState || !expectedState || returnedState !== expectedState) {
+    return NextResponse.redirect(new URL("/?error=oauth_state", request.url))
   }
 
-  if (!code) {
-    return NextResponse.redirect("/?error=no_code")
-  }
+  cookies().delete("oauth_state")
 
   try {
-    // Exchange code for access token
+    const origin = process.env.APP_URL || url.origin
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: process.env.GOOGLE_CLIENT_ID!,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+        client_id: process.env.GOOGLE_CLIENT_ID || "",
+        client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
         code,
         grant_type: "authorization_code",
-        redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/auth/callback`,
+        redirect_uri: `${origin}/api/auth/callback`,
       }),
     })
 
     const tokens = await tokenResponse.json()
-
-    if (tokens.error) {
-      throw new Error(tokens.error_description || tokens.error)
+    if (!tokenResponse.ok || !tokens.access_token) {
+      throw new Error(tokens.error_description || tokens.error || "Token exchange failed")
     }
 
-    // Store tokens in secure cookies
-    const cookieStore = cookies()
-    cookieStore.set("google_access_token", tokens.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      maxAge: tokens.expires_in,
+    const profileResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+      cache: "no-store",
+    })
+    const profile = await profileResponse.json()
+
+    if (!profileResponse.ok || !profile.id || !profile.email) {
+      throw new Error("Could not load Google profile")
+    }
+
+    const existing = await db.user.findFirst({
+      where: { OR: [{ googleSub: String(profile.id) }, { email: String(profile.email) }] },
     })
 
-    if (tokens.refresh_token) {
-      cookieStore.set("google_refresh_token", tokens.refresh_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 60 * 60 * 24 * 30, // 30 days
-      })
-    }
+    const user = existing
+      ? await db.user.update({
+          where: { id: existing.id },
+          data: {
+            googleSub: String(profile.id),
+            email: String(profile.email),
+            name: profile.name || existing.name,
+            avatarUrl: profile.picture || existing.avatarUrl,
+          },
+        })
+      : await db.user.create({
+          data: {
+            googleSub: String(profile.id),
+            email: String(profile.email),
+            name: profile.name || null,
+            avatarUrl: profile.picture || null,
+          },
+        })
 
-    return NextResponse.redirect("/")
+    const priorConnection = await db.googleConnection.findUnique({ where: { userId: user.id } })
+
+    await db.googleConnection.upsert({
+      where: { userId: user.id },
+      create: {
+        userId: user.id,
+        encryptedAccessToken: encryptSecret(tokens.access_token),
+        encryptedRefreshToken: tokens.refresh_token ? encryptSecret(tokens.refresh_token) : null,
+        accessTokenExpiresAt: new Date(Date.now() + Number(tokens.expires_in || 3600) * 1000),
+        scope: tokens.scope || null,
+      },
+      update: {
+        encryptedAccessToken: encryptSecret(tokens.access_token),
+        encryptedRefreshToken: tokens.refresh_token
+          ? encryptSecret(tokens.refresh_token)
+          : priorConnection?.encryptedRefreshToken,
+        accessTokenExpiresAt: new Date(Date.now() + Number(tokens.expires_in || 3600) * 1000),
+        scope: tokens.scope || priorConnection?.scope,
+      },
+    })
+
+    await createSession(user.id)
+    return NextResponse.redirect(new URL("/", request.url))
   } catch (error) {
-    console.error("OAuth callback error:", error)
-    return NextResponse.redirect("/?error=auth_failed")
+    console.error("OAuth callback failed", error)
+    return NextResponse.redirect(new URL("/?error=auth_failed", request.url))
   }
 }
