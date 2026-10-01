@@ -46,6 +46,7 @@ export async function POST(_request: NextRequest, context: { params: { id: strin
     const files = await db.driveFile.findMany({
       where: {
         userId: user.id,
+        lastIndexedAt: { gte: scan.startedAt },
         analyses: { none: { scanId: scan.id } },
       },
       orderBy: [{ modifiedTime: "desc" }, { id: "asc" }],
