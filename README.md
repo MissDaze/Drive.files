@@ -2,7 +2,7 @@
 
 A multi-user web application that connects to Google Drive, inventories a user's files, analyses readable content with AI, identifies related projects and intellectual property, and surfaces practical commercial opportunities.
 
-The project is designed for Railway: one Next.js service plus one PostgreSQL service.
+The project is designed for Railway: one Docker-built Next.js service plus one PostgreSQL service.
 
 ## What it does
 
@@ -233,16 +233,22 @@ Add the same domain and `/api/auth/callback` URI in the Google Cloud OAuth clien
 
 ### 5. Deploy
 
-`railway.json` configures:
+Railway detects the committed `Dockerfile` and builds the application from it. The container:
 
-- npm install
-- Prisma client generation
-- Next.js production build
-- `prisma migrate deploy` before startup
-- `/api/health` health check
-- automatic restart on failure
+- installs npm dependencies;
+- generates the Prisma client;
+- builds Next.js;
+- runs `prisma migrate deploy` before starting the web server.
 
 The initial database migration is committed under `prisma/migrations/`.
+
+After creating the service, set its Railway health-check path to:
+
+```
+/api/health
+```
+
+A repository-level `railway.json` is intentionally not used. Railway has deprecated Config-as-Code for new services in favour of its newer infrastructure configuration model; the Dockerfile keeps the application deployable without depending on that legacy mechanism.
 
 ## Multi-user data separation
 
