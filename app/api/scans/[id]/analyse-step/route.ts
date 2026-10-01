@@ -150,7 +150,7 @@ export async function POST(_request: NextRequest, context: { params: { id: strin
     }
 
     const remaining = await db.driveFile.count({
-      where: { userId: user.id, analyses: { none: { scanId: scan.id } } },
+      where: { userId: user.id, lastIndexedAt: { gte: scan.startedAt }, analyses: { none: { scanId: scan.id } } },
     })
 
     const updated = await db.scan.update({
