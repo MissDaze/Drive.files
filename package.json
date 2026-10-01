@@ -1,7 +1,10 @@
 {
   "name": "asset-archaeologist",
   "version": "1.0.0",
-  "private": true,\n  "engines": { "node": ">=20.16.0" },
+  "private": true,
+  "engines": {
+    "node": ">=20.16.0"
+  },
   "scripts": {
     "build": "prisma generate && next build",
     "dev": "next dev",
