@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Archive,
   BrainCircuit,
-  CheckCircle2,
   Database,
   FileSearch,
+  FolderOpen,
   FolderSearch2,
   LogOut,
   Package,
@@ -32,6 +32,7 @@ type Scan = {
 type MeState = {
   authenticated: boolean
   driveConnected?: boolean
+  driveAccessMode?: "picker" | "full"
   user?: { id: string; email: string; name?: string | null; avatarUrl?: string | null }
   latestScan?: Scan | null
   fileCount?: number
@@ -85,6 +86,21 @@ function scoreStyle(score: number) {
   if (score >= 75) return "bg-emerald-100 text-emerald-800"
   if (score >= 50) return "bg-amber-100 text-amber-800"
   return "bg-slate-100 text-slate-700"
+}
+
+async function loadScript(id: string, src: string) {
+  if (document.getElementById(id)) return
+
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script")
+    script.id = id
+    script.src = src
+    script.async = true
+    script.defer = true
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error("Could not load Google Picker"))
+    document.head.appendChild(script)
+  })
 }
 
 export default function HomePage() {
@@ -150,9 +166,7 @@ export default function HomePage() {
         if (!response.ok) throw new Error(data.error || "Scan step failed")
         setScan(data.scan)
 
-        if (data.scan?.status === "completed") {
-          await refreshData()
-        }
+        if (data.scan?.status === "completed") await refreshData()
       } catch (e) {
         setError(e instanceof Error ? e.message : "Scan step failed")
       }
@@ -169,6 +183,80 @@ export default function HomePage() {
     if (!scan.totalFiles) return 15
     return Math.min(90, Math.max(15, Math.round(((scan.analysedFiles + scan.skippedFiles) / scan.totalFiles) * 85)))
   }, [scan])
+
+  const chooseDriveFiles = async () => {
+    setBusy(true)
+    setError("")
+
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY
+      const appId = process.env.NEXT_PUBLIC_GOOGLE_APP_ID
+      if (!apiKey || !appId) {
+        throw new Error("Google Picker is not configured on this deployment")
+      }
+
+      await loadScript("google-api-loader", "https://apis.google.com/js/api.js")
+      const w = window as any
+
+      await new Promise<void>((resolve, reject) => {
+        w.gapi.load("picker", {
+          callback: () => resolve(),
+          onerror: () => reject(new Error("Google Picker library failed to load")),
+        })
+      })
+
+      const tokenResponse = await fetch("/api/drive/picker-token", { cache: "no-store" })
+      const tokenData = await tokenResponse.json()
+      if (!tokenResponse.ok) throw new Error(tokenData.error || "Could not authorize Google Picker")
+
+      await new Promise<void>((resolve, reject) => {
+        const view = new w.google.picker.DocsView(w.google.picker.ViewId.DOCS)
+        if (typeof view.setIncludeFolders === "function") view.setIncludeFolders(true)
+        if (typeof view.setSelectFolderEnabled === "function") view.setSelectFolderEnabled(false)
+
+        const picker = new w.google.picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(tokenData.accessToken)
+          .setDeveloperKey(apiKey)
+          .setAppId(appId)
+          .enableFeature(w.google.picker.Feature.MULTISELECT_ENABLED)
+          .setCallback(async (data: any) => {
+            const action = data[w.google.picker.Response.ACTION]
+
+            if (action === w.google.picker.Action.PICKED) {
+              try {
+                const docs = data[w.google.picker.Response.DOCUMENTS] || []
+                const ids = docs
+                  .map((doc: any) => doc[w.google.picker.Document.ID])
+                  .filter(Boolean)
+
+                const response = await fetch("/api/drive/import-picked", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ fileIds: ids }),
+                })
+                const result = await response.json()
+                if (!response.ok) throw new Error(result.error || "Could not import selected files")
+
+                await refreshData()
+                resolve()
+              } catch (e) {
+                reject(e)
+              }
+            }
+
+            if (action === w.google.picker.Action.CANCEL) resolve()
+          })
+          .build()
+
+        picker.setVisible(true)
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not open Google Picker")
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const startScan = async () => {
     setBusy(true)
@@ -240,12 +328,12 @@ export default function HomePage() {
                 Find the products, projects and IP hiding in your Google Drive.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-                Asset Archaeologist inventories your Drive, reads supported files, groups related work and identifies
-                what is sellable, nearly sellable, useful as a bundle, or better kept internal.
+                Asset Archaeologist reads supported files, groups related work and identifies what is sellable,
+                nearly sellable, useful as a bundle, or better kept internal.
               </p>
               <div className="mt-8 grid max-w-3xl gap-3 sm:grid-cols-3">
                 {[
-                  ["Inventory", "Scan the Drive instead of the first 100 files."],
+                  ["Discover", "Choose Drive files now; full-Drive discovery can be enabled after Google verification."],
                   ["Understand", "Analyse Docs, Sheets, PDFs, DOCX, text and images."],
                   ["Monetise", "Get target buyers, routes, gaps, pricing and next steps."],
                 ].map(([title, body]) => (
@@ -261,10 +349,10 @@ export default function HomePage() {
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-400 text-slate-950">
                 <FolderSearch2 className="h-6 w-6" />
               </div>
-              <h2 className="text-2xl font-semibold">Connect Google Drive</h2>
+              <h2 className="text-2xl font-semibold">Connect Google</h2>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Sign in with Google and grant read-only Drive access. Your OAuth credentials are encrypted before they
-                are stored in the application database.
+                Sign in with Google. The public-safe configuration uses Google Picker so you choose which Drive files
+                the app can access. OAuth credentials are encrypted before storage in PostgreSQL.
               </p>
               <a
                 href="/api/auth/google"
@@ -273,8 +361,8 @@ export default function HomePage() {
                 Continue with Google
               </a>
               <p className="mt-4 text-xs leading-5 text-slate-500">
-                File content selected for analysis is sent to the configured OpenRouter model. Drive access itself is
-                read-only.
+                Analysed file content is sent to the configured OpenRouter model. The application code does not issue
+                Drive write or delete requests.
               </p>
             </section>
           </div>
@@ -282,6 +370,8 @@ export default function HomePage() {
       </main>
     )
   }
+
+  const pickerMode = me.driveAccessMode !== "full"
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
@@ -293,7 +383,9 @@ export default function HomePage() {
             </div>
             <div>
               <div className="font-semibold">Asset Archaeologist</div>
-              <div className="text-xs text-slate-500">Google Drive commercial asset discovery</div>
+              <div className="text-xs text-slate-500">
+                {pickerMode ? "Google Picker mode" : "Verified full-Drive mode"}
+              </div>
             </div>
           </div>
 
@@ -316,7 +408,7 @@ export default function HomePage() {
 
         <section className="mb-6 grid gap-4 md:grid-cols-4">
           {[
-            { label: "Indexed assets", value: me.fileCount || 0, icon: Database },
+            { label: pickerMode ? "Chosen assets" : "Indexed assets", value: me.fileCount || 0, icon: Database },
             { label: "Opportunities", value: opportunities.length, icon: Target },
             { label: "Saved bundles", value: bundles.length, icon: Package },
             { label: "Latest scan", value: statusLabel(scan?.status), icon: FileSearch },
@@ -353,20 +445,49 @@ export default function HomePage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-semibold">Drive scan</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Inventory, analyse and synthesize your Drive into a commercial asset catalogue.
+                  <h2 className="text-xl font-semibold">{pickerMode ? "Selected-file analysis" : "Full Drive scan"}</h2>
+                  <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                    {pickerMode
+                      ? "Choose files through Google Picker, then analyse them for projects, IP and commercial opportunities."
+                      : "Inventory the connected Drive, analyse readable assets and synthesize them into a commercial catalogue."}
                   </p>
                 </div>
-                <button
-                  onClick={startScan}
-                  disabled={busy || Boolean(scan && ACTIVE.has(scan.status))}
-                  className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <RefreshCw className={`h-4 w-4 ${scan && ACTIVE.has(scan.status) ? "animate-spin" : ""}`} />
-                  {scan && ACTIVE.has(scan.status) ? "Scan running" : me.fileCount ? "Rescan Drive" : "Scan Drive"}
-                </button>
+
+                <div className="flex flex-wrap gap-2">
+                  {pickerMode && (
+                    <button
+                      onClick={chooseDriveFiles}
+                      disabled={busy || Boolean(scan && ACTIVE.has(scan.status))}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      Choose Drive files
+                    </button>
+                  )}
+
+                  <button
+                    onClick={startScan}
+                    disabled={busy || Boolean(scan && ACTIVE.has(scan.status)) || (pickerMode && !me.fileCount)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${scan && ACTIVE.has(scan.status) ? "animate-spin" : ""}`} />
+                    {scan && ACTIVE.has(scan.status)
+                      ? "Analysis running"
+                      : pickerMode
+                        ? "Analyse chosen files"
+                        : me.fileCount
+                          ? "Rescan Drive"
+                          : "Scan Drive"}
+                  </button>
+                </div>
               </div>
+
+              {pickerMode && (
+                <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                  Public-safe mode uses Google Picker and per-file access. It does not silently read the rest of the
+                  user's Drive.
+                </div>
+              )}
 
               {scan ? (
                 <div className="mt-7">
@@ -394,7 +515,7 @@ export default function HomePage() {
                 </div>
               ) : (
                 <div className="mt-7 rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-                  No scan has been run yet.
+                  {pickerMode ? "Choose Drive files to begin." : "No scan has been run yet."}
                 </div>
               )}
             </section>
@@ -416,7 +537,7 @@ export default function HomePage() {
         {tab === "opportunities" && (
           <section className="space-y-4">
             {opportunities.length === 0 ? (
-              <Empty icon={Target} title="No opportunities yet" body="Run a Drive scan. Commercial candidates will appear here after synthesis." />
+              <Empty icon={Target} title="No opportunities yet" body="Run an analysis. Commercial candidates will appear here after synthesis." />
             ) : (
               opportunities.map((opportunity) => (
                 <article key={opportunity.id} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -461,7 +582,9 @@ export default function HomePage() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2 className="text-xl font-semibold">Asset catalogue</h2>
-                <p className="mt-1 text-sm text-slate-500">The most recently modified indexed Drive assets.</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {pickerMode ? "Files explicitly chosen through Google Picker." : "Indexed files from the connected Drive."}
+                </p>
               </div>
               <div className="flex gap-2">
                 <input
