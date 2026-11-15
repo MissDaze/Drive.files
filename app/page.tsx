@@ -30,7 +30,7 @@ export default function HomePage() {
   const connectToDrive = async () => {
     setLoading(true)
     try {
-      // Redirect to Google OAuth
+
       window.location.href = "/api/auth/google"
     } catch (error) {
       console.error("Failed to connect to Google Drive:", error)
@@ -81,7 +81,7 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    // Check if user is already authenticated
+    
     loadFiles()
   }, [])
 
@@ -105,7 +105,7 @@ export default function HomePage() {
         </div>
 
         {!isConnected ? (
-          /* Connection Card */
+          
           <Card className="max-w-md mx-auto border-0 shadow-xl bg-white/80 backdrop-blur-sm">
             <CardHeader className="text-center">
               <div className="mx-auto mb-4 p-4 bg-blue-100 dark:bg-blue-900/30 rounded-full w-fit">
@@ -127,7 +127,7 @@ export default function HomePage() {
             </CardContent>
           </Card>
         ) : (
-          /* Main Dashboard */
+          
           <Tabs defaultValue="files" className="space-y-6">
             <TabsList className="grid w-full grid-cols-3 bg-white/80 backdrop-blur-sm border-0 shadow-lg">
               <TabsTrigger value="files" className="flex items-center gap-2">
