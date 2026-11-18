@@ -1,10 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+// AI Drive Analyzer — Nix Nightshade
+
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Folder, Sparkles, Package, Brain, Drill as Drive } from "lucide-react"
+import { Folder, Sparkles, Package, Brain, HardDrive } from "lucide-react"
 import { DriveFileList } from "@/components/drive-file-list"
 import { AIAnalysisPanel } from "@/components/ai-analysis-panel"
 import { ProductBundler } from "@/components/product-bundler"
@@ -21,74 +23,104 @@ interface DriveFile {
 
 export default function HomePage() {
   const [isConnected, setIsConnected] = useState(false)
+  const [checkingDrive, setCheckingDrive] = useState(true)
+  const [loadingFiles, setLoadingFiles] = useState(false)
+  const [analysing, setAnalysing] = useState(false)
+  const [error, setError] = useState("")
   const [files, setFiles] = useState<DriveFile[]>([])
-  const [loading, setLoading] = useState(false)
   const [analysisQuery, setAnalysisQuery] = useState("")
   const [analysisResult, setAnalysisResult] = useState("")
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
 
-  const connectToDrive = async () => {
-    setLoading(true)
-    try {
-
-      window.location.href = "/api/auth/google"
-    } catch (error) {
-      console.error("Failed to connect to Google Drive:", error)
-    } finally {
-      setLoading(false)
-    }
+  const connectToDrive = () => {
+    window.location.assign("/api/auth/google")
   }
 
   const loadFiles = async () => {
-    setLoading(true)
+    setLoadingFiles(true)
+    setError("")
+
     try {
-      const response = await fetch("/api/drive/files")
-      if (response.ok) {
-        const data = await response.json()
-        setFiles(data.files || [])
-        setIsConnected(true)
+      const response = await fetch("/api/drive/files", { cache: "no-store" })
+
+      if (response.status === 401) {
+        setIsConnected(false)
+        setFiles([])
+        setSelectedFiles([])
+        return
       }
-    } catch (error) {
-      console.error("Failed to load files:", error)
+
+      if (!response.ok) {
+        throw new Error(`Could not load Drive files (${response.status})`)
+      }
+
+      const data: { files?: DriveFile[] } = await response.json()
+      if (!Array.isArray(data.files)) throw new Error("Drive returned an invalid file list")
+
+      const nextFiles = data.files
+      setFiles(nextFiles)
+      setSelectedFiles((selected) =>
+        selected.filter((id) => nextFiles.some((file) => file.id === id))
+      )
+      setIsConnected(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to retrieve Drive files")
     } finally {
-      setLoading(false)
+      setLoadingFiles(false)
+      setCheckingDrive(false)
     }
   }
 
   const analyzeFiles = async () => {
-    if (!analysisQuery.trim()) return
+    const query = analysisQuery.trim()
+    if (!query || analysing) return
 
-    setLoading(true)
+    const fileIds = selectedFiles.length
+      ? selectedFiles
+      : files.map((file) => file.id)
+
+    if (!fileIds.length) {
+      setError("There are no files available to analyse")
+      return
+    }
+
+    setAnalysing(true)
+    setError("")
+
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: analysisQuery,
-          fileIds: selectedFiles.length > 0 ? selectedFiles : files.map((f) => f.id),
-        }),
+        body: JSON.stringify({ query, fileIds }),
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        setAnalysisResult(data.analysis)
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error("Your Drive session has expired. Reconnect and try again.")
+        }
+        throw new Error(`Analysis failed (${response.status})`)
       }
-    } catch (error) {
-      console.error("Analysis failed:", error)
+
+      const data: { analysis?: string } = await response.json()
+      if (typeof data.analysis !== "string") {
+        throw new Error("The analysis response was incomplete")
+      }
+
+      setAnalysisResult(data.analysis)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to finish the analysis")
     } finally {
-      setLoading(false)
+      setAnalysing(false)
     }
   }
 
   useEffect(() => {
-    
-    loadFiles()
+    void loadFiles()
   }, [])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800">
       <div className="container mx-auto px-4 py-8">
-        {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
             <div className="p-3 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl">
@@ -104,12 +136,22 @@ export default function HomePage() {
           </p>
         </div>
 
-        {!isConnected ? (
+        {error && (
+          <div role="alert" className="max-w-4xl mx-auto mb-6 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        {checkingDrive ? (
+          <div className="text-center py-16 text-muted-foreground">
+            Checking your Drive connection...
+          </div>
+        ) : !isConnected ? (
           
           <Card className="max-w-md mx-auto border-0 shadow-xl bg-white/80 backdrop-blur-sm">
             <CardHeader className="text-center">
               <div className="mx-auto mb-4 p-4 bg-blue-100 dark:bg-blue-900/30 rounded-full w-fit">
-                <Drive className="h-8 w-8 text-blue-600" />
+                <HardDrive className="h-8 w-8 text-blue-600" />
               </div>
               <CardTitle className="text-2xl">Connect to Google Drive</CardTitle>
               <CardDescription className="text-base">
@@ -119,10 +161,10 @@ export default function HomePage() {
             <CardContent>
               <Button
                 onClick={connectToDrive}
-                disabled={loading}
+                disabled={checkingDrive}
                 className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium py-6 text-lg"
               >
-                {loading ? "Connecting..." : "Connect Google Drive"}
+                Connect Google Drive
               </Button>
             </CardContent>
           </Card>
@@ -147,7 +189,7 @@ export default function HomePage() {
             <TabsContent value="files" className="space-y-6">
               <DriveFileList
                 files={files}
-                loading={loading}
+                loading={loadingFiles}
                 onRefresh={loadFiles}
                 selectedFiles={selectedFiles}
                 onSelectionChange={setSelectedFiles}
@@ -159,7 +201,7 @@ export default function HomePage() {
                 query={analysisQuery}
                 onQueryChange={setAnalysisQuery}
                 result={analysisResult}
-                loading={loading}
+                loading={analysing || loadingFiles}
                 onAnalyze={analyzeFiles}
                 selectedCount={selectedFiles.length}
                 totalCount={files.length}
